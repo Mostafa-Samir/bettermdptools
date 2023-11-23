@@ -76,7 +76,7 @@ class Planner:
             warnings.warn("Max iterations reached before convergence.  Check theta and n_iters.  ")
 
         pi = lambda s: {s:a for s, a in enumerate(np.argmax(Q, axis=1))}[s]
-        return V, V_track, pi
+        return V, V_track[:i, :], pi
 
     @print_runtime
     def policy_iteration(self, gamma=1.0, n_iters=50, theta=1e-10):
@@ -125,7 +125,7 @@ class Planner:
         if not converged:
             warnings.warn("Max iterations reached before convergence.  Check n_iters.")
         pi_fn = lambda s: pi[s]
-        return V, V_track, pi_fn
+        return V, V_track[:i, :], pi_fn
 
     def policy_evaluation(self, pi, prev_V, gamma=1.0, theta=1e-10):
         while True:
