@@ -29,7 +29,6 @@ class Planner:
     def __init__(self, P):
         self.P = P
 
-    @print_runtime
     def value_iteration(self, gamma=1.0, n_iters=1000, theta=1e-10):
         """
         PARAMETERS:
@@ -78,7 +77,6 @@ class Planner:
         pi = lambda s: {s:a for s, a in enumerate(np.argmax(Q, axis=1))}[s]
         return V, V_track[:i, :], pi
 
-    @print_runtime
     def policy_iteration(self, gamma=1.0, n_iters=50, theta=1e-10):
         """
         PARAMETERS:
