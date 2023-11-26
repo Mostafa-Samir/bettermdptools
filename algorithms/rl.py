@@ -20,6 +20,8 @@ Assumes no prior knowledge of the type of reward available to the agent.
 Given enough episodes, tries to find an estimate of the optimal policy.
 """
 
+from collections import deque
+
 import numpy as np
 from tqdm import tqdm
 from utils.callbacks import MyCallbacks
@@ -70,9 +72,26 @@ class RL:
         values = (values - values.min()) / (values.max() - values.min())
         values = (init_value - min_value) * values + min_value
         values = np.pad(values, (0, rem_steps), 'edge')
+    
         return values
+    
+    def evaluate_policy(self, pi, n_episodes=100):
+        rewards = []
+        for i in range(n_episodes):
+            state, *_ = self.env.reset(seed=i)
+            total_reward = 0
 
-    @print_runtime
+            while True:
+                action = pi[state]
+                state, reward, done, trauncated, *_ = self.env.step(action)
+                total_reward += reward
+                if done or trauncated:
+                    break
+
+            rewards.append(total_reward)
+
+        return np.mean(rewards)
+
     def q_learning(self,
                    nS=None,
                    nA=None,
@@ -145,9 +164,13 @@ class RL:
             nS=self.env.observation_space.n
         if nA is None:
             nA=self.env.action_space.n
-        pi_track = []
+
+        #pi_track = []
+
         Q = np.zeros((nS, nA), dtype=np.float64)
-        Q_track = np.zeros((n_episodes, nS, nA), dtype=np.float64)
+        V = np.random.normal(size=(nS, ))
+        #Q_track = np.zeros((n_episodes, nS, nA), dtype=np.float64)
+        V_max_track = []
         # Explanation of lambda:
         # def select_action(state, Q, epsilon):
         #   if np.random.random() > epsilon:
@@ -165,18 +188,31 @@ class RL:
                                   min_epsilon,
                                   epsilon_decay_ratio,
                                   n_episodes)
-        for e in tqdm(range(n_episodes), leave=False):
+        #pb = tqdm(range(n_episodes), leave=False)
+        last_n_evals = deque(maxlen=100)
+        max_v_cumavg = 0
+        alpha = 0.99995
+        trunc_count = 0
+        reached_goal=0
+        patiaence = 0
+        for e in range(n_episodes):
             self.callbacks.on_episode_begin(self)
             self.callbacks.on_episode(self, episode=e)
             state, info = self.env.reset()
             done = False
             state = convert_state_obs(state, done)
+            episode_reward = 0
             while not done:
                 if self.render:
                     warnings.warn("Occasional render has been deprecated by openAI.  Use test_env.py to render.")
+                #current_eps = min(min_epsilon, init_epsilon * (epsilon_decay_ratio ** (e + 1)))
                 action = select_action(state, Q, epsilons[e])
                 next_state, reward, terminated, truncated, _ = self.env.step(action)
+                if reward > 0:
+                    reached_goal += 1
+                episode_reward += reward
                 if truncated:
+                    trunc_count += 1
                     warnings.warn("Episode was truncated.  Bootstrapping 0 reward.")
                 done = terminated or truncated
                 self.callbacks.on_env_step(self)
@@ -185,15 +221,36 @@ class RL:
                 td_error = td_target - Q[state][action]
                 Q[state][action] = Q[state][action] + alphas[e] * td_error
                 state = next_state
-            Q_track[e] = Q
-            pi_track.append(np.argmax(Q, axis=1))
+            V_max_track.append(np.max(Q).astype(np.float32))
+            #pi_track.append(np.argmax(Q, axis=1))
             self.render = False
             self.callbacks.on_episode_end(self)
 
+            
+            max_V = np.max(Q)
+            new_max_v_cumavg = max_v_cumavg + (max_V - max_v_cumavg) / (e + 1)
+
+            rdiff = np.abs(new_max_v_cumavg - max_v_cumavg) / np.abs(max_v_cumavg)
+            adiff = np.abs(new_max_v_cumavg - max_v_cumavg)
+
+            if rdiff < 1e-6:
+                patiaence += 1
+                if patiaence >= 10000:
+                    #print("Early stopping ...")
+                    break
+            else:
+                patiaence = 0
+
+            max_v_cumavg = new_max_v_cumavg
+
+            #pb.set_description(f"{max_v_cumavg}, {rdiff}, {patiaence}")
+
+        #pb.close()
         V = np.max(Q, axis=1)
 
         pi = {s: a for s, a in enumerate(np.argmax(Q, axis=1))}
-        return Q, V, pi, Q_track, pi_track
+        pi_fn = lambda s: pi[s]
+        return Q, V, pi_fn, np.asarray(V_max_track)#, pi_track[:e]
 
     @print_runtime
     def sarsa(self,
@@ -289,7 +346,8 @@ class RL:
                                   epsilon_decay_ratio,
                                   n_episodes)
 
-        for e in tqdm(range(n_episodes), leave=False):
+        pb = tqdm(range(n_episodes), leave=False)
+        for e in pb:
             self.callbacks.on_episode_begin(self)
             self.callbacks.on_episode(self, episode=e)
             state, info = self.env.reset()
